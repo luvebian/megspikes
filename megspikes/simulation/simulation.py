@@ -7,9 +7,9 @@ import mne
 import numpy as np
 import nibabel as nb
 from mne.datasets import sample
-from mne.source_space import _check_mri
+from mne._freesurfer import _check_mri
 from scipy import signal
-from scipy.misc import electrocardiogram
+from scipy.datasets import electrocardiogram
 
 from ..casemanager.casemanager import CaseManager
 from ..utils import stc_to_nifti, labels_to_mni
@@ -161,6 +161,7 @@ class Simulation:
         self._simulate_data_structure(simulation)
         self._simulate_case()
         # Save resection
+        print(self.case_manager.fwd)
         self._labels_to_resection(
             self.fresection, self.case_manager.fwd['ico5'])
         self.raw = simulation
@@ -191,8 +192,17 @@ class Simulation:
         info = mne.io.read_info(fname_info)
         meg_channels = mne.pick_types(info, meg=True, exclude=[])
         info = mne.pick_info(info, meg_channels)
+
+        raw_path = op.join(meg_path, 'sample_audvis_raw.fif')
+        raw_ = mne.io.read_raw_fif(raw_path)
+
+        # Pick MEG channels and resample to 1000 Hz
+        raw_.resample(1000)  # This updates info['sfreq'] automatically
+
+        # Use the updated info from the resampled raw object
+        info = mne.pick_info(raw_.info, meg_channels)
         info['bads'] = []
-        info['sfreq'] = 1000  # Hz
+    
         # self.tstep = 1 / info['sfreq']
 
         # forward solution

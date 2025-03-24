@@ -638,7 +638,7 @@ class SaveDataset(TransformerMixin, BaseEstimator):
     def __init__(self, dataset: Union[str, Path],
                  sensors: Union[str, None] = None,
                  run: Union[int, None] = None,
-                 rewrite_previous_results=False) -> None:
+                 rewrite_previous_results=True) -> None:
         self.dataset = dataset
         self.sensors = sensors
         self.run = run

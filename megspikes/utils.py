@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import List, Tuple, Union, Any, Dict
 
 import mne
-from mne.source_space import _check_mri
+from mne._freesurfer import _check_mri
 
 try:
     # mne 0.23

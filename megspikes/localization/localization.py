@@ -5,12 +5,13 @@ import warnings
 import mne
 import numpy as np
 import xarray as xr
+from pathlib import Path
 from mne.beamformer._compute_beamformer import _prepare_beamformer_input
-from mne.io.pick import pick_channels_forward, pick_info
+from mne._fiff.pick import pick_channels_forward, pick_info
 from mne.minimum_norm import apply_inverse, make_inverse_operator
 from mne.morph import _get_subject_sphere_tris, _hemi_morph
 from mne.surface import mesh_edges
-from mne.utils import _check_info_inv
+from mne.utils.check import _check_info_inv
 from scipy import linalg, sparse
 from sklearn.base import BaseEstimator, TransformerMixin
 
@@ -125,7 +126,7 @@ class Localization():
         Returns
         -------
         label_tc : np.ndarray
-            with the shape: lables by time
+            with the shape: labels by time
         """
         labels_parc = mne.read_labels_from_annot(
             subject=self.case_name,  subjects_dir=self.freesurfer_dir)
@@ -221,7 +222,7 @@ class Localization():
         """Smooth binary SourceEstimate. """
         vertices = stc.vertices[hemi_idx]
         tris = _get_subject_sphere_tris(
-            self.case_name, self.freesurfer_dir)[hemi_idx]
+            self.case_name, Path(self.freesurfer_dir))[hemi_idx]
         e = mesh_edges(tris)
         n_vertices = e.shape[0]
         maps = sparse.identity(n_vertices).tocsr()
