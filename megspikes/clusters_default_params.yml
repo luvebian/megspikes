@@ -6,7 +6,7 @@ PrepareClustersDataset:
 ClustersLocalization:
   inv_method: MNE
   epochs_window: [-0.5, 0.5]
-  spacing: ico5 # the number of sources in the forward model
+  spacing: oct6 # the number of sources in the forward model
   # case: CaseManager
   # sensors: True
 
@@ -16,6 +16,6 @@ PredictIZClusters:
   amplitude_threshold: 0.5 # amplitude threshold for the SourceEstimate binarization; Note that the amplitude values are between 0 and 1 because data are normalized.
   min_sources: 10 # select at least min_sources sources it there is less sources above the amplitude_threshold
   normalize_using_peak: yes # normalize clusters source estimate using peak amplitude; if False then slope and baseline predictions are normalized according slope and baseline maximum values respectively
-  spacing: ico5 # the number of sources in the forward model
+  spacing: oct6 # the number of sources in the forward model
   # case: CaseManager
   # sensors: True

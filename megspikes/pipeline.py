@@ -123,7 +123,7 @@ def aspire_alphacsc_pipeline(case: CaseManager, update_params: dict,
                      **params['PrepareData'])),
         ('prepare_aspire_alphacsc_dataset',
          PrepareAspireAlphacscDataset(
-             fif_file=case.fif_file, fwd=case.fwd['ico5'],
+             fif_file=case.fif_file, fwd=case.fwd['oct6'],
              **params['PrepareAspireAlphacscDataset'])),
         ('save_empty_dataset', SaveDataset(
             dataset=case.dataset,
@@ -156,7 +156,7 @@ def iz_prediction_pipeline(case: CaseManager, update_params: dict,
     params = update_default_params(default_params, update_params)
     pipe = Pipeline([
         ('prepare_clusters_dataset',
-         PrepareClustersDataset(fif_file=case.fif_file, fwd=case.fwd['ico5'],
+         PrepareClustersDataset(fif_file=case.fif_file, fwd=case.fwd['oct6'],
                                 **params['PrepareClustersDataset'])),
         ('localize_clusters',
          ClustersLocalization(case=case, **params['ClustersLocalization'])),
@@ -173,6 +173,8 @@ def iz_prediction_pipeline(case: CaseManager, update_params: dict,
 def read_detection_iz_prediction_pipeline(
         case: CaseManager, clusters_params: dict,
         rewrite_previous_results: bool = False):
+    print("type of SRC", type(case.src['oct6']))
+    print("SRC", case.src['oct6'])
     if (not rewrite_previous_results) & case.cluster_dataset.is_file():
         raise RuntimeError(
             'Results dataset exists and you try to overwrite it. If you want to'

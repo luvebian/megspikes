@@ -1,10 +1,15 @@
 import logging
-
+import os
+import nibabel as nib
+from nilearn.image import index_img
+from nilearn.plotting import plot_stat_map
+import mne
 import matplotlib.pylab as plt
 import mne
 import numpy as np
 import panel as pn
 import param
+import pickle
 import xarray as xr
 from nilearn import plotting
 from scipy import signal
@@ -27,9 +32,10 @@ mne.set_log_level("WARNING")
 class PlotDetections(Localization):
     """Plot spikes' detection results.
     """
+
     def __init__(self, ds: xr.Dataset, case: CaseManager) -> None:
         self.ds = ds.copy(deep=True)
-        self.setup_fwd(case, sensors=True, spacing='oct5')
+        self.setup_fwd(case, sensors=True, spacing='ico5')
         self.grad = self.ds.attrs['grad']
         self.mag = self.ds.attrs['mag']
         self.dprop = self.ds.detection_properties.copy(deep=True)
@@ -90,7 +96,7 @@ class DetectionsViewer(param.Parameterized):
                 default_layout=pn.Row,
                 name="Select",
                 width=800
-                ),
+            ),
             pn.Row(
                 self._plot_ica_components,
                 width=1000,
@@ -149,7 +155,7 @@ class DetectionsViewer(param.Parameterized):
                 default_layout=pn.Row,
                 name="Parameters",
                 width=800
-                ),
+            ),
             pn.Param(
                 self.param,
                 parameters=['time', 'preprocess_ica_ts'],
@@ -159,7 +165,7 @@ class DetectionsViewer(param.Parameterized):
             pn.Row(
                 self._plot_ica_sources_with_overlay, width=1000, height=600,
                 scroll=True)
-            )
+        )
         return app
 
     @param.depends('sensors', 'preprocess_ica_ts', watch=True)
@@ -189,7 +195,7 @@ class DetectionsViewer(param.Parameterized):
 
         for ica_comp_ind in self.data.ds.ica_component.values:
             detections.loc[ica_comp_ind] = (
-                self.ica_ts.loc[ica_comp_ind] * self.data.dprop.loc[sel2])
+                    self.ica_ts.loc[ica_comp_ind] * self.data.dprop.loc[sel2])
             mask = ica_source_ind != ica_comp_ind
             if self.detection_type == 'alphacsc_detection':
                 mask2 = np.zeros_like(mask, dtype=bool)
@@ -238,7 +244,7 @@ class DetectionsViewer(param.Parameterized):
                 default_layout=pn.Row,
                 name="Select",
                 width=800
-                ),
+            ),
             pn.Row(
                 self._plot_ica_peak_localizations,
                 width=1000,
@@ -267,7 +273,7 @@ class DetectionsViewer(param.Parameterized):
         markers = np.vstack([x_mni, y_mni, z_mni]).T[detections != 0]
         fig, ax = plt.subplots(figsize=(12, 7))
         display = plotting.plot_glass_brain(
-                    None, display_mode='lzry', figure=fig, axes=ax)
+            None, display_mode='lzry', figure=fig, axes=ax)
         display.add_markers(markers, marker_color='tomato', alpha=0.2)
 
         plt.close()
@@ -283,7 +289,7 @@ class DetectionsViewer(param.Parameterized):
                 default_layout=pn.Row,
                 name="Select",
                 width=800
-                ),
+            ),
             pn.Row(
                 self._plot_alphacsc_atoms,
                 width=1000,
@@ -308,7 +314,6 @@ class DetectionsViewer(param.Parameterized):
         fig, axes = plt.subplots(n_plots * split, n_columns, figsize=figsize)
 
         for ii, kk in enumerate(plotted_atoms):
-
             i_row, i_col = ii // n_columns, ii % n_columns
             it_axes = iter(axes[i_row * n_plots:(i_row + 1) * n_plots, i_col])
 
@@ -345,7 +350,7 @@ class DetectionsViewer(param.Parameterized):
                 default_layout=pn.Row,
                 name="Select",
                 width=800
-                ),
+            ),
             pn.Row(
                 self._plot_alphacsc_clusters,
                 width=1000,
@@ -392,7 +397,7 @@ class DetectionsViewer(param.Parameterized):
 
         fig = plt.figure(figsize=(10, 5), dpi=150)
         ax1 = plt.subplot(2, 2, 1)
-        spikes_max_channel = spikes.T/(np.max(np.abs(spikes)))
+        spikes_max_channel = spikes.T / (np.max(np.abs(spikes)))
         spikes_max_channel_times = np.linspace(
             -0.25, 0.25, n_samples_epoch)
         ax1.plot(spikes_max_channel_times, spikes_max_channel,
@@ -405,8 +410,8 @@ class DetectionsViewer(param.Parameterized):
         i = 1
         while i < len(labels):
             if labels[i] in labels[:i]:
-                del(labels[i])
-                del(handles[i])
+                del (labels[i])
+                del (handles[i])
             else:
                 i += 1
         ax1.legend(handles, labels, fontsize='xx-small')
@@ -420,9 +425,9 @@ class DetectionsViewer(param.Parameterized):
 
         times = [
             epochs.times[t] for t in range(
-                10, n_samples_epoch-10, n_samples_epoch // 10)]
+                10, n_samples_epoch - 10, n_samples_epoch // 10)]
         for n, time in enumerate(times):
-            ax = plt.subplot(2, len(times), len(times) + n+1)
+            ax = plt.subplot(2, len(times), len(times) + n + 1)
             evoked.plot_topomap(
                 time, axes=ax, show=False, colorbar=False, contours=0)
         plt.close()
@@ -432,9 +437,10 @@ class DetectionsViewer(param.Parameterized):
 class PlotClusters(Localization):
     """Plot detected spikes average and localization.
     """
+
     def __init__(self, ds: xr.Dataset, case: CaseManager) -> None:
         self.ds = ds.copy(deep=True)
-        self.setup_fwd(case, sensors=True, spacing='ico5')
+        self.setup_fwd(case, sensors=True, spacing='oct6')
         self.prepare_clusters_properties(ds.copy(deep=True))
         self.stc = self.ds.mne_localization.copy(deep=True)
         self.evoked = self.ds.evoked.copy(deep=True)
@@ -464,8 +470,9 @@ class PlotClusters(Localization):
         del self.clusters_properties['pipeline_type']
 
 
-class ClusterSlopeViewer(param.Parameterized):
+class ClusterSlopeViewer(param.Parameterized, CaseManager):
     """Clusters slope viewer. """
+
     cluster = param.Selector(default=0, label="Cluster")
     sensors = param.Selector(default='grad', objects=['mag', 'grad'],
                              label="Sensors")
@@ -479,6 +486,10 @@ class ClusterSlopeViewer(param.Parameterized):
 
     plot_iz = param.Action(lambda x: x.param.trigger('plot_iz'),
                            label="Plot IZ prediction")
+    plot_iz_vol = param.Action(lambda x: x.param.trigger('plot_iz_vol'),
+                               label="Plot IZ volume prediction")
+    plot_vol = param.Action(lambda x: x.param.trigger('plot_vol'),
+                            label="Plot volume")
     plot_evoked = param.Action(lambda x: x.param.trigger('plot_evoked'),
                                label="Plot Evoked")
     save_ds = param.Action(lambda x: x.param.trigger('save_ds'),
@@ -508,13 +519,132 @@ class ClusterSlopeViewer(param.Parameterized):
 
     @param.depends('plot_stc', watch=True)
     def _plot_stc_brain(self):
+        # Преобразование данных в STC
         stc = self.data.array_to_stc(
             self.data.stc.sel(
                 cluster=self.cluster, sensors=self.sensors).values,
-            self.data.fwd, self.data.case_name)
+            self.data.fwd,
+            self.data.case_name
+        )
+
+        # Загрузка source space
+        filepath = f'/Users/diana/Documents/cases/{self.data.case_name}/forward_model/src.pckl'
+        src = pickle.load(open(filepath, "rb"))
+
+        stc.volume().plot(src=src, subjects_dir='/Users/diana/Documents/FreeSurfer')
+
+        '''
+        # Проверяем соответствие количества вершин
+        src_vertices = [s['vertno'] for s in src]
+        stc_vertices = stc.vertices
+
+        # Сопоставление вершин STC с SRC
+        new_vertices = []
+        for stc_verts, src_verts in zip(stc_vertices, src_vertices):
+            # Оставляем только совпадающие вершины
+            common_verts = np.intersect1d(stc_verts, src_verts)
+            new_vertices.append(common_verts)
+
+        # Проверяем, все ли вершины STC найдены в SRC
+        if any(len(new) == 0 for new in new_vertices):
+            raise ValueError(
+                f"Mismatch between STC {len(new_vertices)} and source space vertices: some STC vertices are missing in SRC."
+            )
+
+        # Создаём новый STC с подогнанными вершинами
+        stc = mne.SourceEstimate(
+            data=stc.data[:sum(len(v) for v in new_vertices)],
+            vertices=new_vertices,
+            tmin=stc.tmin,
+            tstep=stc.tstep,
+            subject=stc.subject
+        )
+
+        print("Adjusted STC:", stc)
+
+        # Проверяем, является ли это surface source space
+        src_types = [s['type'] for s in src]
+        if not all(t == 'surf' for t in src_types):
+            raise ValueError("Source space is not purely surface. Adjust for mixed source space visualization.")
+
+        # Визуализация
         self.brain = stc.plot(
-            subjects_dir=self.data.freesurfer_dir, hemi='both')
-        # pc.brain.widgets['time'].get_value()
+            hemi='both',
+            src=src,
+            views='coronal',
+            initial_time=0.2,
+            subjects_dir=self.data.freesurfer_dir,
+            brain_kwargs=dict(silhouette=True),
+            smoothing_steps=7
+        )
+        '''
+
+    @param.depends('plot_vol', watch=True)
+    def _plot_vol_brain(self):
+        """
+        Преобразование данных STC в NIfTI формат и визуализация с помощью Nilearn.
+        """
+        # Преобразование данных в MixedSourceEstimate
+        stc = self.data.array_to_stc(
+            self.data.stc.sel(
+                cluster=self.cluster, sensors=self.sensors
+            ).values,
+            self.data.fwd,
+            self.data.case_name
+        )
+
+        # Проверка корректности типа STC
+        if not isinstance(stc, mne.MixedSourceEstimate):
+            raise TypeError(f"Expected MixedSourceEstimate, but got {type(stc).__name__}.")
+
+        # Получение src из fwd
+        src = self.data.fwd['src']
+        print("SRC:", src)
+
+        # Выбор только объемных источников (volume regions)
+        volume_src = [s for s in src if s['type'] == 'vol']
+        print(volume_src)
+        if not volume_src:
+            raise ValueError("No volume source regions found in the source space.")
+
+        print("VOLUME:", volume_src)
+
+        labels_vol = mne.get_volume_labels_from_src(src, subject=self.data.case_name, subjects_dir=self.data.freesurfer_dir)
+
+        # Преобразование MixedSourceEstimate в VolumeSourceEstimate
+        stc_vol = stc.copy().extract_label_time_course(
+            labels=labels_vol, src=src, mode='mean'
+        )
+
+        # Сохранение в формате NIfTI
+        nii_path = os.path.join(
+            f'/Users/diana/Documents/FreeSurfer/{self.data.case_name}/bem',
+            'stc_volume.nii.gz'
+        )
+        mne.save_stc_as_volume(nii_path, stc_vol, src, mri_resolution=False)
+        print(f"NIfTI file saved at {nii_path}")
+
+
+        # Работа с T1-файлом
+        t1_fname = f'/Users/diana/Documents/FreeSurfer/{self.data.case_name}/mri/T1.mgz'
+        if not os.path.exists(t1_fname):
+            raise FileNotFoundError(f"T1-weighted MRI file not found: {t1_fname}")
+
+        # Выбор времени для визуализации
+        time_idx = 61  # Индекс времени
+
+        # Загрузка сохраненного NIfTI и визуализация
+        try:
+            nii_img = nib.load(nii_path)
+            plot_stat_map(
+                index_img(nii_img, time_idx),
+                bg_img=t1_fname,
+                threshold=0.0,
+                title=f"Nilearn Visualization (t={stc_vol.times[time_idx]:.1f} s)",
+            )
+            print("Nilearn visualization complete.")
+        except Exception as e:
+            print("Error during NIfTI processing:", str(e))
 
     @param.depends('plot_evoked', watch=True)
     def _plot_evoked(self):
@@ -536,13 +666,39 @@ class ClusterSlopeViewer(param.Parameterized):
                 self.data.ds.iz_prediction.sel(
                     iz_prediction_timepoint=self.timepoint).values,
                 self.data.fwd, self.data.case_name)
+            print("stc shape:", stc.shape)
+            print(self.data.case_name)
+            filepath = f'/Users/diana/Documents/cases/{self.data.case_name}/forward_model/src.pckl'
+            src = pickle.load(open(filepath, "rb"))
+            # src = mne.read_source_spaces(filepath)
             surfer_kwargs = dict(
-                hemi='both',  surface='inflated',  spacing='ico4',
+                hemi='both', surface='white', spacing='ico4',
                 colorbar=False, background='w', foreground='k',
-                colormap='Reds', smoothing_steps=10, alpha=1,
+                colormap='Reds', smoothing_steps=10, alpha=0.2,
                 add_data_kwargs={"fmin": 0, "fmid": 0.5, "fmax": 0.8})
             self.brain = stc.plot(
-                subjects_dir=self.data.freesurfer_dir, **surfer_kwargs)
+                src=src,
+                views="coronal",
+                subjects_dir=self.data.freesurfer_dir,
+                brain_kwargs=dict(silhouette=True),
+                **surfer_kwargs
+            )
+            filepath_stc = f'/Users/diana/Documents/cases/{self.data.case_name}/forward_model/stc.pckl'
+            pickle.dump(stc, open(filepath_stc, "wb"))
+        else:
+            logging.warning("IZ prediction is running")
+
+    @param.depends('plot_iz_vol', watch=True)
+    def _plot_iz_prediciton_vol(self):
+        if not self.prediction_is_running:
+            stc = self.data.array_to_stc(
+                self.data.ds.iz_prediction.sel(
+                    iz_prediction_timepoint=self.timepoint).values,
+                self.data.fwd, self.data.case_name)
+            filepath = f'/Users/diana/Documents/cases/{self.data.case_name}/forward_model/src.pckl'
+            src = pickle.load(open(filepath, "rb"))
+            self.brain = stc.volume().plot(
+                src=src, subjects_dir=self.data.freesurfer_dir, mode="glass_brain")
         else:
             logging.warning("IZ prediction is running")
 
@@ -592,7 +748,7 @@ class ClusterSlopeViewer(param.Parameterized):
                 default_layout=pn.Row,
                 name="Select cluster",
                 width=800
-                ),
+            ),
             # self.data.clusters_properties,
             self.table,
             pn.Param(
@@ -602,22 +758,29 @@ class ClusterSlopeViewer(param.Parameterized):
                 default_layout=pn.Row,
                 name="IZ prediction settings",
                 width=800
-                ),
+            ),
             pn.Param(
                 self.param,
-                parameters=['plot_stc', 'plot_iz', 'plot_evoked', 'save_ds'],
+                parameters=['plot_stc', 'plot_vol', 'plot_evoked', 'save_ds'],
                 default_layout=pn.Row,
                 name="Actions",
                 width=800
-                ),
+            ),
+            pn.Param(
+                self.param,
+                parameters=['plot_iz', 'plot_iz_vol'],
+                default_layout=pn.Row,
+                name="IZ maps",
+                width=800
+            ),
             pn.Param(
                 self.param,
                 parameters=['fname_save_ds'],
                 default_layout=pn.Row,
                 name="Information",
                 width=800
-                )
             )
+        )
         return app
 
 
@@ -628,14 +791,14 @@ def plot_epochs_snr(epochs: mne.Epochs, event_name: str, peak_ind: int = 500,
     snr_max, max_ch = spike_snr_max_channel(data, peak_ind, n_max_channels)
 
     fig, ax = plt.subplots(1, 2, figsize=(14, 3), dpi=100)
-    abs_data = data**2
+    abs_data = data ** 2
     ax[0].plot(abs_data.mean(0).T, c='k', linewidth=0.3, alpha=0.5)
     ax[0].plot(abs_data.mean(axis=1).mean(0), c='r')
     ax[0].set_title(f'SNR all channels: {snr_all:.2}dB')
     ax[0].set_xlabel('$Time [ms]$')
     ax[0].set_ylabel('$Amplitude^2$')
 
-    max_chs = data[:, max_ch, :]**2
+    max_chs = data[:, max_ch, :] ** 2
     ax[1].plot(max_chs.mean(0).T, c='k', linewidth=0.3, alpha=0.5)
     ax[1].plot(max_chs.mean(axis=1).mean(0), c='r')
     ax[1].set_title(f'SNR {n_max_channels} max channels: {snr_max:.2}dB')

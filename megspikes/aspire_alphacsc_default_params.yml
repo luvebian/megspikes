@@ -27,7 +27,7 @@ DecompositionICA: # ICA decomposition
   n_ica_components: 20 # the number of the ICA components
 
 ICAComponentsLocalization: # ICA components localization using equivalent current dipole (ECD) fitting
-  spacing: oct5 # the number of sources in the forward model
+  spacing: oct6 # the number of sources in the forward model
   # case: CaseManager
   # sensors: True
 
@@ -55,7 +55,7 @@ PeakDetection: # peak detection using selected ICA components timeseries
   n_detections_threshold: 2000 # minimum number of the detections; decrease the amplitude threshold until this value is reached
 
 PeakLocalization: # ICA peaks localization using MEG data
-  spacing: oct5 # the number of sources in the forward model
+  spacing: oct6 # the number of sources in the forward model
   sfreq: 200. # Hz
   window: [-20, 30] # RAP-MUSIC dipole fitting window in ms
   # case: CaseManager
@@ -95,7 +95,7 @@ DecompositionAlphaCSC: # decompose MEG data using AlphaCSC algorithm
   n_jobs: 1
 
 AlphaCSCComponentsLocalization:
-  spacing: oct5 # the number of sources in the forward model
+  spacing: oct6 # the number of sources in the forward model
   # case: CaseManager
   # sensors: True
 

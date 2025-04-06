@@ -2,6 +2,8 @@ import re
 import warnings
 from pathlib import Path
 from typing import List, Union
+from nilearn import plotting
+import os.path as op
 
 import mne
 import pandas as pd
@@ -151,96 +153,99 @@ class CaseManager():
         else:
             warnings.warn("No tsss fif file")
 
-    def prepare_forward_model(self, spacings: List[str] = ['ico5', 'oct5'],
+    def prepare_forward_model(self, spacing = 'oct6',
                               sensors: Union[str, bool] = True) -> None:
         info = mne.io.read_info(self.fif_file)
         self.info = mne.pick_info(info, mne.pick_types(info, meg=sensors))
         self.fwd = {}
         self.bem, self.src, self.trans = {}, {}, {}
-        for spacing in spacings:
-            fwd_name = self.basic_folders['forward_model']
-            fwd_name = fwd_name / f'forward_{spacing}.fif'
-            fwd, bem, src, trans = self._prepare_forward_model(
-                fwd_name, self.info, spacing=spacing, n_jobs=7, fixed=False)
+        fwd_name = self.basic_folders['forward_model']
+        fwd_name = fwd_name / f'forward_{spacing}.fif'
+        fwd, bem, src, trans = self._prepare_forward_model(
+        fwd_name, self.info, spacing=spacing, n_jobs=7, fixed=False)
 
-            if isinstance(sensors, str):
-                fwd = mne.pick_types_forward(fwd, meg=sensors)
+        if isinstance(sensors, str):
+            fwd = mne.pick_types_forward(fwd, meg=sensors)
 
-            self.fwd[spacing] = fwd
-            self.bem[spacing] = bem
-            self.src[spacing] = src
-            self.trans[spacing] = trans
+        self.fwd[spacing] = fwd
+        self.bem[spacing] = bem
+        self.src[spacing] = src
+        self.trans[spacing] = trans
 
-    def _prepare_forward_model(self, fwd_name, info, spacing='ico5',
-                               n_jobs=7, fixed=False):
-        """Make forwad solution
+    def _prepare_forward_model(self, fwd_name, info, spacing='oct6', n_jobs=7, fixed=False):
+        labels_vol = [
+            'Left-Hippocampus', 'Left-Amygdala', 'Left-Insula', 'Left-Operculum',
+            'Right-Hippocampus', 'Right-Amygdala', 'Right-Insula', 'Right-Operculum'
+        ]
 
-        NOTE: Coregistration was done in Brainstorm and affine
-        from MRI srucute in BrainStorm was used
+        subjects_dir = self.freesurfer_dir
+        subject = self.case
 
-        Parameters
-        ----------
-        freesurfer_dir : str
-            FreeSurfer folder (including bem)
-        spacing : str, optional
-            'oct5' - 1026*2 sources, by default 'ico5' - 10242*2 sources
-        """
-        fsrc = fwd_name.with_name(f'source_spaces_{spacing}.fif')
-        if not fsrc.is_file():
-            try:
-                src = mne.setup_source_space(
-                    self.case, spacing=spacing, add_dist='patch',
-                    subjects_dir=self.freesurfer_dir, n_jobs=n_jobs)
-            except Exception:
-                warnings.warn(f'Using ico4 instead of {spacing}')
-                # traceback.print_exc()
-                src = mne.setup_source_space(
-                    self.case, spacing='ico4', add_dist='patch',
-                    subjects_dir=self.freesurfer_dir, n_jobs=n_jobs)
-            mne.write_source_spaces(
-                fsrc, src, overwrite=True, verbose='error')
-        else:
-            src = mne.read_source_spaces(fsrc, verbose='error')
-
+        fname_aseg = op.join(subjects_dir, subject, 'mri', 'aseg.mgz')
+        bem_dir = op.join(subjects_dir, subject, 'bem')
         fbem = fwd_name.with_name('bem_solution.fif')
+        fsrc = fwd_name.with_name(f'source_spaces_{spacing}.fif')
+
+        # Создание BEM решения
         if not fbem.is_file():
-            # (0.3, 0.006, 0.3)  # for three layers
-            conductivity = (0.3, )
+            conductivity = (0.3,)  # Проводимость для мозговых тканей
             try:
-                model = mne.make_bem_model(
-                    subject=self.case, ico=5, conductivity=conductivity,
-                    subjects_dir=self.freesurfer_dir)
+                model = mne.make_bem_model(subject=subject, ico=5, conductivity=conductivity, subjects_dir=subjects_dir)
             except Exception:
                 warnings.warn('Using ico4 instead of ico5 for BEM model')
-                # traceback.print_exc()
-                model = mne.make_bem_model(
-                    subject=self.case, ico=4, conductivity=conductivity,
-                    subjects_dir=self.freesurfer_dir)
+                model = mne.make_bem_model(subject=subject, ico=4, conductivity=conductivity, subjects_dir=subjects_dir)
             bem = mne.make_bem_solution(model)
-            mne.write_bem_solution(fwd_name.with_name('bem_solution.fif'), bem)
+            mne.write_bem_solution(fbem, bem)
         else:
             bem = mne.read_bem_solution(fbem, verbose='error')
 
+        # Создание источников
+        if not fsrc.is_file():
+            # Корковые источники
+            src = mne.setup_source_space(subject, spacing=spacing, add_dist=False, subjects_dir=subjects_dir, n_jobs=n_jobs)
+
+            # Объёмные источники
+            vol_src = mne.setup_volume_source_space(
+                subject=subject,
+                pos=5.0,  # Шаг сетки в мм
+                bem=bem,
+                mri=fname_aseg,
+                volume_label=labels_vol,
+                subjects_dir=subjects_dir,
+                add_interpolator=True,
+                verbose=True
+            )
+
+            # Слияние
+            src += vol_src
+
+            # Сохранение
+            print("!!!!", type(src))
+            mne.write_source_spaces(fsrc, src, overwrite=True, verbose='error')
+        else:
+            src = mne.read_source_spaces(fsrc, verbose='error')
+
+        # Трансформация
         ftrans = fwd_name.with_name('checked_visually_trans.fif')
         trans = mne.read_trans(ftrans)
 
-        # info = mne.io.read_info(self.fif_path)
+        # Создание forward решения
         if not fwd_name.is_file():
             fwd = mne.make_forward_solution(
-                info, trans=trans, src=src, bem=bem,
-                meg=True, eeg=False, mindist=5.0)
+                info,
+                trans=trans,
+                src=src,
+                bem=bem,
+                meg=True,
+                eeg=False,
+                mindist=5.0,
+                n_jobs=n_jobs
+            )
             mne.write_forward_solution(fwd_name, fwd, overwrite=True)
         else:
-            fwd = mne.read_forward_solution(
-                str(fwd_name), verbose='error')  # 306 sensors x 20000 dipoles
+            fwd = mne.read_forward_solution(str(fwd_name), verbose='error')
 
         if fixed:
-            fwd_fixed = mne.convert_forward_solution(
-                fwd, surf_ori=True, force_fixed=True, use_cps=True)
-            fwd_fixed_name = str(fwd_name.with_name('fixed_forward.fif'))
-            mne.write_forward_solution(
-                fwd_fixed_name, fwd_fixed, overwrite=True)
-            # sio.savemat(str(fwd_name.with_name('fixed_forward.mat')), {
-            #             'fwd_fixed': fwd['sol']['data']})
-
+            fwd = mne.convert_forward_solution(fwd, force_fixed=True, verbose='error')
+        print("FINAL SRC:", type(src))
         return fwd, bem, src, trans

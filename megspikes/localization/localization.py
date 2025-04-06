@@ -3,6 +3,7 @@ from typing import Any, List, Tuple, Union
 import warnings
 
 import mne
+import pickle
 import numpy as np
 import xarray as xr
 from pathlib import Path
@@ -23,35 +24,55 @@ from ..utils import create_epochs, onset_slope_timepoints
 mne.set_log_level("ERROR")
 
 
-def array_to_stc(data: np.ndarray, fwd: mne.Forward, subject: str
-                 ) -> mne.SourceEstimate:
-    """Convert SourceEstimate data to mne.SourceEstimate object.
+def array_to_stc(data: np.ndarray, fwd: mne.Forward, subject: str) -> mne.MixedSourceEstimate:
+    """
+    Convert SourceEstimate data to mne.MixedSourceEstimate for mixed source space.
 
     Parameters
     ----------
     data : np.ndarray
-        1D array with the length equal the number of sources in the head model
+        2D array (n_vertices x n_times) corresponding to source activities.
     fwd : mne.Forward
-        Head model
+        Forward solution (head model).
     subject : str
-        Subject (case) name
+        Subject name for the source estimate.
 
     Returns
     -------
-    mne.SourceEstimate
+    mne.MixedSourceEstimate
+        Source estimate for mixed source space.
     """
-    vertices = [i['vertno'] for i in fwd['src']]
-    return mne.SourceEstimate(
-        data, vertices, tmin=0, tstep=0.001, subject=subject)
+    vertices = [src['vertno'] for src in fwd['src']]
+    total_vertices = sum(len(v) for v in vertices)
+
+    print(f"Forward model: {fwd}")
+    print(f"Total vertices in forward model: {total_vertices}")
+    print(f"Data shape: {data.shape}")
+
+    if data.shape[0] != total_vertices:
+        if data.shape[0] > total_vertices:
+            print(f"Warning: Truncating data from {data.shape[0]} to {total_vertices} vertices.")
+            data = data[:total_vertices, :]
+        else:
+            raise ValueError(f"Data has {data.shape[0]} values, but forward model has {total_vertices} vertices.")
+
+    return mne.MixedSourceEstimate(
+        data=data,
+        vertices=vertices,
+        tmin=0,
+        tstep=0.001,
+        subject=subject
+    )
 
 
 class Localization():
+    ## Add documentation about changes in code and new func and classes
     """Base class to prepare components for source localization and evaluation.
     """
     array_to_stc = staticmethod(array_to_stc)
 
     def setup_fwd(self, case: CaseManager, sensors: Union[str, bool] = True,
-                  spacing: str = 'oct5') -> None:
+                  spacing: str = 'oct6') -> None:
         """Prepare objects for source localization.
 
         Parameters
@@ -84,6 +105,43 @@ class Localization():
         self.info, self.fwd, self.cov = self.pick_sensors(
             case.info, case.fwd[spacing], sensors)
 
+    def setup_mixed_src(self):
+        """Create and configure mixed source space."""
+        bem_dir = f'/Users/diana/Documents/FreeSurfer/{self.case_name}/bem'
+
+        # Create source spaces
+        src = mne.setup_source_space(
+            subject=self.case_name,
+            spacing='oct6',  # adjust spacing if necessary
+            add_dist=False,
+            subjects_dir=bem_dir
+        )
+
+        vol_src = mne.setup_volume_source_space(
+            subject=self.case_name,
+            pos=5.0,  # grid spacing
+            mri=f'{bem_dir}\\T1.mgz',
+            bem=f'{bem_dir}\\{self.case_name}-5120-bem-sol.fif'
+        )
+
+        # Combine the source spaces
+        self.mixed_src = src + vol_src
+
+    def create_mixed_stc(self):
+        """Convert array to MixedSourceEstimate."""
+        stc_data = self.array_to_stc(
+            self.case.stc.sel(
+                cluster=self.cluster, sensors=self.sensors
+            ).values,
+            self.fwd,
+            self.case_name
+        )
+
+        if not isinstance(stc_data, mne.MixedSourceEstimate):
+            raise TypeError(f"Expected MixedSourceEstimate, but got {type(stc_data).__name__}.")
+
+        return stc_data
+
     def pick_sensors(self, info: mne.Info, fwd: mne.Forward,
                      sensors: Union[str, bool] = True
                      ) -> Tuple[mne.Info, mne.Forward, mne.Covariance]:
@@ -102,8 +160,7 @@ class Localization():
         Returns
         -------
         Tuple[mne.Info, mne.Forward, mne.Covariance]
-            Info, Forward model and Diagonal covariance for the for the
-            selected sensors type
+            Info, Forward model and Diagonal covariance for the selected sensors type
         """
         info_ = mne.pick_info(info, mne.pick_types(info, meg=sensors))
         if isinstance(sensors, str):
@@ -113,14 +170,14 @@ class Localization():
         cov = mne.make_ad_hoc_cov(info_)
         return info_, fwd_, cov
 
-    def make_labels_ts(self, stc: mne.SourceEstimate,
+    def make_labels_ts(self, stc: mne.MixedSourceEstimate,
                        inverse_operator: mne.minimum_norm.InverseOperator,
                        mode: str = 'mean') -> np.ndarray:
         """Extract anatomical labels time courses.
 
         Parameters
         ----------
-        stc : mne.SourceEstimate
+        stc : mne.MixedSourceEstimate
             [description]
 
         Returns
@@ -129,11 +186,15 @@ class Localization():
             with the shape: labels by time
         """
         labels_parc = mne.read_labels_from_annot(
-            subject=self.case_name,  subjects_dir=self.freesurfer_dir)
+            subject=self.case_name, subjects_dir=self.freesurfer_dir)
         src = inverse_operator['src']
-
+        print("type of src:", type(src))
+        filepath = f'/Users/diana/Documents/cases/{self.case_name}/forward_model/src.pckl'
+        pickle.dump(src, open(filepath, "wb"))
         label_ts = mne.extract_label_time_course(
             [stc], labels_parc, src, mode=mode, allow_empty=True)
+        print("label_ts: ", label_ts)
+        print("labels_shape:", label_ts[0].shape)
         return label_ts
 
     def binarize_stc(self, data: np.ndarray, fwd: mne.Forward,
@@ -141,7 +202,7 @@ class Localization():
                      amplitude_threshold: float = 0.5,
                      min_sources: int = 10,
                      normalize: bool = True) -> np.ndarray:
-        """Binarization and smoothing of one SourceEstimate timepoint.
+        """Binarization and smoothing of one VolSourceEstimate timepoint.
            converting to mne.SourceEstimate.
 
         Parameters
@@ -184,22 +245,22 @@ class Localization():
         """
         vertices = [i['vertno'] for i in fwd['src']]
 
-        # normalize data
+        # Normalize data
         if normalize:
             data /= data.max()
 
-        # check if amplitude is too small
+        # Check if amplitude is too small
         if np.sum(data > amplitude_threshold) < min_sources:
             sort_data_ind = np.argsort(data)[::-1]
             data[sort_data_ind[:min_sources]] = 1
 
-        # threshold the data
+        # Threshold the data
         data[data < amplitude_threshold] = 0
         data[data >= amplitude_threshold] = 1
 
         # Create SourceEstimate object
-        stc = mne.SourceEstimate(data, vertices, tmin=0,
-                                 tstep=0.001, subject=self.case_name)
+        stc = mne.MixedSourceEstimate(data, vertices, tmin=0,
+                                      tstep=0.001, subject=self.case_name)
         # NOTE: final_data is 1D here
         final_data = np.zeros_like(data)
 
@@ -211,36 +272,42 @@ class Localization():
         # Smooth final surface right hemi
         rh_data = self._smooth_binarized_stc(
             stc, hemi_idx=1, smoothing_steps=smoothing_steps)
-        final_data[len(stc.vertices[0]):] = rh_data
+        final_data[len(stc.vertices[0]):len(stc.vertices[0]) + len(stc.vertices[1])] = rh_data
+
+        data = stc.data[len(stc.vertices[0]) + len(stc.vertices[1]):, :]
+        final_data[len(stc.vertices[0]) + len(stc.vertices[1]):] = data.flatten()
         final_data[final_data > 0] = 1
 
-        # return binary map
+        # Return binary map
         return final_data
 
-    def _smooth_binarized_stc(self, stc: mne.SourceEstimate, hemi_idx: int,
+    def _smooth_binarized_stc(self, stc: mne.MixedSourceEstimate, hemi_idx: int,
                               smoothing_steps: int = 10):
         """Smooth binary SourceEstimate. """
         vertices = stc.vertices[hemi_idx]
         tris = _get_subject_sphere_tris(
-            self.case_name, Path(self.freesurfer_dir))[hemi_idx]
+            Path(self.case_name), Path(self.freesurfer_dir))[hemi_idx]
         e = mesh_edges(tris)
         n_vertices = e.shape[0]
         maps = sparse.identity(n_vertices).tocsr()
-
+        print(
+            f'stc.data: {np.shape(stc.data)}, for 0: {np.shape(stc.data[:len(stc.vertices[hemi_idx]), :])}, else: {np.shape(stc.data[len(stc.vertices[0]):len(stc.vertices[0]) + len(stc.vertices[1]), :])}')
         if hemi_idx == 0:
             data = stc.data[:len(stc.vertices[hemi_idx]), :]
         else:
-            data = stc.data[len(stc.vertices[0]):, :]
+            data = stc.data[len(stc.vertices[0]):len(stc.vertices[0]) + len(stc.vertices[1]), :]
         smooth_mat = _hemi_morph(
             tris, vertices, vertices, smoothing_steps, maps, warn=False)
+        print(f'smooth_mat: {smooth_mat}, shape: {np.shape(smooth_mat)}, data: {data}, shape: {np.shape(data)}')
         data = smooth_mat.dot(data)
         return data.flatten()
 
 
 class ICAComponentsLocalization(Localization, BaseEstimator, TransformerMixin):
     """ Localize ICA components using mne.fit_dipole()."""
+
     def __init__(self, case: CaseManager, sensors: Union[str, bool] = True,
-                 spacing: str = 'oct5'):
+                 spacing: str = 'ico5'):
         self.spacing = spacing
         self.setup_fwd(case, sensors, spacing)
 
@@ -260,7 +327,7 @@ class ICAComponentsLocalization(Localization, BaseEstimator, TransformerMixin):
         gof = np.zeros(len(dip))
         for n, d in enumerate(dip):
             locs[n, :] = mne.head_to_mni(
-                d.pos[0],  self.case_name, self.fwd['mri_head_t'],
+                d.pos[0], self.case_name, self.fwd['mri_head_t'],
                 subjects_dir=self.freesurfer_dir)
             gof[n] = d.gof[0]
 
@@ -284,9 +351,10 @@ class PeakLocalization(Localization, BaseEstimator, TransformerMixin):
     window : list, optional
         MUSIC window, by default [-20, 30]
     """
+
     def __init__(self, case: CaseManager, sensors: Union[str, bool] = True,
                  sfreq: int = 200, window: List[int] = [-20, 30],
-                 spacing: str = 'oct5'):
+                 spacing: str = 'oct6'):
         self.spacing = spacing
         self.setup_fwd(case, sensors, spacing)
         self.window = window
@@ -303,7 +371,7 @@ class PeakLocalization(Localization, BaseEstimator, TransformerMixin):
         timestamps = np.where(detection > 0)[0]
 
         data = X[1].get_data()
-        window = (np.array(self.window)/1000)*self.sfreq
+        window = (np.array(self.window) / 1000) * self.sfreq
         mni_coords, subcorr = self.fast_music(
             data, self.info, timestamps, window=window)
 
@@ -339,11 +407,11 @@ class PeakLocalization(Localization, BaseEstimator, TransformerMixin):
         subcorrs = np.zeros(len(spikes), dtype=np.float64)
 
         for n, spike in enumerate(spikes):
-            spike_data = data[:, int(spike+window[0]): int(spike+window[1])]
+            spike_data = data[:, int(spike + window[0]): int(spike + window[1])]
             pos, ori, subcorr = self._apply_music(
                 *common_atr, data=spike_data, n_dipoles=5)
             zyx_mni[n] = mne.head_to_mni(
-                pos,  self.case_name, self.fwd['mri_head_t'],
+                pos, self.case_name, self.fwd['mri_head_t'],
                 subjects_dir=self.freesurfer_dir)
             subcorrs[n] = subcorr
         return zyx_mni, subcorrs
@@ -372,8 +440,8 @@ class PeakLocalization(Localization, BaseEstimator, TransformerMixin):
         # G3->G2
         if n_orient == 3:  # or other optional condition
             G3 = G.copy()
-            G = np.zeros((G3.shape[0], (G3.shape[1]//n_orient)*2))
-            for i_source in range(G3.shape[1]//n_orient):
+            G = np.zeros((G3.shape[0], (G3.shape[1] // n_orient) * 2))
+            for i_source in range(G3.shape[1] // n_orient):
                 idx_k = slice(n_orient * i_source, n_orient * (i_source + 1))
                 idx_r = slice(2 * i_source, 2 * (i_source + 1))
                 Gk = G3[:, idx_k]
@@ -405,7 +473,7 @@ class PeakLocalization(Localization, BaseEstimator, TransformerMixin):
                 Sg.append(_Sg[:rank].T.conjugate())
                 Vg.append(_Vg[:rank].T.conjugate())
         Ug = np.asarray(Ug)
-        Ug = np.reshape(Ug, (Ug.shape[0]*Ug.shape[1], Ug.shape[2]))
+        Ug = np.reshape(Ug, (Ug.shape[0] * Ug.shape[1], Ug.shape[2]))
 
         return picks, forward, whitener, is_free_ori, G, Ug, Sg, Vg, n_orient
 
@@ -446,13 +514,13 @@ class PeakLocalization(Localization, BaseEstimator, TransformerMixin):
         tmp2d = np.multiply(tmp[::2, :], tmp[1::2, :].conj())
         tmp2_11_22 = np.sum(tmp2, axis=0)  # find diagonals
         tmp2_11_22 = np.reshape(
-            tmp2_11_22, (tmp2_11_22.shape[0]//2, 2)).transpose()
+            tmp2_11_22, (tmp2_11_22.shape[0] // 2, 2)).transpose()
         tmp2_12_21 = np.sum(tmp2d, axis=1)  # find off-diagonals
         T = (np.sum(tmp2_11_22, axis=0))  # trace
-        D = np.prod(tmp2_11_22, axis=0)-np.multiply(
+        D = np.prod(tmp2_11_22, axis=0) - np.multiply(
             tmp2_12_21, tmp2_12_21.conj())  # determinant
         # apply theorem about eigenvalues
-        Covar = 0.5*(T+np.sqrt(np.multiply(T, T)-4*D))
+        Covar = 0.5 * (T + np.sqrt(np.multiply(T, T) - 4 * D))
         Covar = np.sqrt(Covar)
         subcorr_max = Covar.max()
 
@@ -464,7 +532,7 @@ class PeakLocalization(Localization, BaseEstimator, TransformerMixin):
 class AlphaCSCComponentsLocalization(Localization, BaseEstimator,
                                      TransformerMixin):
     def __init__(self, case: CaseManager, sensors: Union[str, bool] = True,
-                 spacing: str = 'oct5'):
+                 spacing: str = 'oct6'):
         self.spacing = spacing
         self.setup_fwd(case, sensors, spacing)
 
@@ -481,7 +549,7 @@ class AlphaCSCComponentsLocalization(Localization, BaseEstimator,
         gof = np.zeros(len(dip))
         for n, d in enumerate(dip):
             locs[n, :] = mne.head_to_mni(
-                d.pos[0],  self.case_name, self.fwd['mri_head_t'],
+                d.pos[0], self.case_name, self.fwd['mri_head_t'],
                 subjects_dir=self.freesurfer_dir)
             gof[n] = d.gof[0]
 
@@ -498,8 +566,8 @@ class AlphaCSCComponentsLocalization(Localization, BaseEstimator,
 class ClustersLocalization(Localization, BaseEstimator, TransformerMixin):
     def __init__(self, case: CaseManager,
                  inv_method: str = 'MNE',
-                 epochs_window: Tuple[float] = (-0.5, 0.5),
-                 spacing='ico5'):
+                 epochs_window: Tuple[float, float] = (-0.5, 0.5),
+                 spacing='oct6'):
         self.setup_fwd(case, sensors=True, spacing=spacing)
         self.inv_method = inv_method
         self.epochs_window = epochs_window
@@ -508,7 +576,7 @@ class ClustersLocalization(Localization, BaseEstimator, TransformerMixin):
     def fit(self, X: Tuple[xr.Dataset, mne.io.Raw], y=None):
         return self
 
-    def transform(self, X) -> Tuple[xr.Dataset, mne.io.Raw]:
+    def transform(self, X: Tuple[xr.Dataset, mne.io.Raw]) -> Tuple[xr.Dataset, mne.io.Raw]:
         assert X[0].time.attrs['sfreq'] == X[1].info['sfreq'], (
             "Wrong sfreq of the fif file or database time coordinate")
         spikes = check_and_read_from_dataset(
@@ -552,9 +620,27 @@ class ClustersLocalization(Localization, BaseEstimator, TransformerMixin):
                 # minimum norm
                 stc, label_ts = self.minimum_norm(
                     evoked_sens, inverse_operator[sensor_type])
+
+                # print(f"Labels : {label_ts}")
+
+                # Ignore components and keep only vertices and timepoints
+                stc_data = stc.data[:, :-1]  # Average over components
+                # stc_data = stc_data[:, :1000]  # Keep only first 1000 timepoints
+                print(f"stc_data shape: {stc_data.shape}")
+
+                loc_data = X[0]['mne_localization'].values
+                print(f"Cluster {cluster}, Sensor Type: {sensor_type}")
+                print(f"Adjusted stc_data shape: {stc_data.shape} (Vertices, Timepoints)")
+
+                # Transform loc_data shape to match stc_data
+                loc_data = loc_data.mean(axis=(0, 1))[:, :1000]  # Aggregate dimensions
+                print(f"Transformed loc_data shape: {loc_data.shape}")
+
+                # Write localization results
                 check_and_write_to_dataset(
-                    X[0], 'mne_localization', stc.data[:, :n_times],
+                    X[0], 'mne_localization', stc_data,
                     dict(sensors=sensor_type, cluster=cluster))
+
                 if sensors[n] == sensor_ind:
                     clusters_properties[n, :] = onset_slope_timepoints(
                         label_ts[0].mean(axis=0))
@@ -567,33 +653,27 @@ class ClustersLocalization(Localization, BaseEstimator, TransformerMixin):
 
     def minimum_norm(self, evoked: Union[mne.Evoked, mne.EvokedArray],
                      inverse_operator: mne.minimum_norm.InverseOperator,
-                     inv_method: str = 'MNE') -> Tuple[
-                         mne.SourceEstimate, np.ndarray]:
+                     inv_method: str = 'MNE') -> Tuple[mne.SourceEstimate, np.ndarray]:
         snr = 3.0
         lambda2 = 1.0 / snr ** 2
         stc = apply_inverse(
             evoked, inverse_operator, lambda2, inv_method, pick_ori=None)
         label_ts = self.make_labels_ts(stc, inverse_operator)
+        src = inverse_operator["src"]
+        stc.volume().plot(src=src, subjects_dir='/Users/diana/Documents/FreeSurfer')
         return stc, label_ts
 
     def average_cluster(self, meg_data: mne.io.Raw, detection_mask: np.ndarray,
                         clusters: np.ndarray, cluster: int) -> mne.Evoked:
-        # select timestamps for the cluster
         cluster_mask = detection_mask & (clusters == cluster)
         times = np.where(cluster_mask)[0]
-        # add first sample
         times += meg_data.first_samp
-        # Create epochs for the cluster
         epochs = create_epochs(
             meg_data, times, tmin=self.epochs_window[0],
             tmax=self.epochs_window[1])
-        # Create Evoked
         return epochs.average()
 
-    def select_only_meg_channels(self, ds: xr.Dataset):
-        """Select only the relevant channels in the dataset
-           FIXME Temporary solution to avoid wrong dimensions error
-        """
+    def select_only_meg_channels(self, ds: xr.Dataset) -> xr.Dataset:
         sensors = ds.sensors.values.tolist()
         channels = []
         for sens in sensors:
@@ -602,9 +682,9 @@ class ClustersLocalization(Localization, BaseEstimator, TransformerMixin):
 
 
 class ForwardToMNI(Localization, BaseEstimator, TransformerMixin):
-    """Save MNI coordinates of all Forward model sources.
-    """
-    def __init__(self, case: CaseManager, spacing='ico5'):
+    """Save MNI coordinates of all Forward model sources."""
+
+    def __init__(self, case: CaseManager, spacing='oct6'):
         self.setup_fwd(case, sensors=True, spacing=spacing)
         self.spacing = spacing
 
@@ -612,13 +692,39 @@ class ForwardToMNI(Localization, BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X) -> Tuple[xr.Dataset, Any]:
+        print("Source space information (reference):")
+        for i, src in enumerate(self.fwd['src']):
+            print(f"Source space {i}: type={src['type']}, n_vertices={len(src['vertno'])}")
+
         fwd_source_coords = []
-        for hemi in [0, 1]:
-            hemi_mni = mne.vertex_to_mni(
-                self.fwd['src'][hemi]['vertno'], hemis=hemi,
-                subject=self.case_name, subjects_dir=self.freesurfer_dir)
-            fwd_source_coords.append(hemi_mni)
-        fwd_source_coords = np.vstack(fwd_source_coords)
+        src_len = len(self.fwd['src'])
+
+        for vol in range(10):
+            if vol >= src_len:
+                print(f"Volume {vol} out of range in source spaces.")
+                continue
+            hemi = 0 if vol in [0, 2, 3, 4, 5] else 1
+            print(f"Processing source space {vol}: n_vertices={len(self.fwd['src'][vol]['vertno'])}")
+            if len(self.fwd['src'][vol]['vertno']) != 0:
+                hemi_mni = mne.vertex_to_mni(
+                    self.fwd['src'][vol]['vertno'], hemis=hemi,
+                    subject=self.case_name, subjects_dir=self.freesurfer_dir)
+                fwd_source_coords.append(hemi_mni)
+
+        if fwd_source_coords:
+            fwd_source_coords = np.vstack(fwd_source_coords)
+        else:
+            print("No valid MNI coordinates found. Returning empty array.")
+            fwd_source_coords = np.array([])
+
+        # Align to dataset shape
+        print(f"Final MNI coordinates shape: {fwd_source_coords.shape}")
+        expected_shape = X[0]['fwd_mni_coordinates'].shape
+        print(f"Expected dataset shape: {expected_shape}")
+        if fwd_source_coords.shape[0] < expected_shape[0]:
+            padding = np.zeros((expected_shape[0] - fwd_source_coords.shape[0], 3))
+            fwd_source_coords = np.vstack([fwd_source_coords, padding])
+
         check_and_write_to_dataset(
             X[0], 'fwd_mni_coordinates', fwd_source_coords)
         return X
@@ -656,6 +762,7 @@ class PredictIZClusters(Localization, BaseEstimator, TransformerMixin):
     spacing : str, optional
         the number of sources in the forward model, by default 'ico5'
     """
+
     def __init__(self,
                  case: CaseManager,
                  sensors: Union[str, bool] = True,
@@ -664,7 +771,7 @@ class PredictIZClusters(Localization, BaseEstimator, TransformerMixin):
                  amplitude_threshold: float = 0.5,
                  min_sources: int = 10,
                  normalize_using_peak: bool = True,
-                 spacing='ico5'):
+                 spacing='oct6'):
         self.setup_fwd(case, sensors, spacing=spacing)
         self.spacing = spacing
         self.smoothing_steps_one_cluster = smoothing_steps_one_cluster
@@ -709,13 +816,13 @@ class PredictIZClusters(Localization, BaseEstimator, TransformerMixin):
         if self.normalize_using_peak:
             for i in range(stc_clusters.shape[0]):
                 for ii in range(stc_clusters.shape[1]):
-                    stc_clusters[i, ii, :, :] /= stc_clusters[
-                        i, ii, :, peak[ii]].max()
+                    valid_peak_index = min(peak[ii], stc_clusters.shape[3] - 1)
+                    stc_clusters[i, ii, :, :] /= stc_clusters[i, ii, :, valid_peak_index].max()
 
         for slope_time, slope_name in zip([baseline, slope, peak],
                                           ['baseline', 'slope', 'peak']):
             iz_prediciton = self.make_iz_prediction(
-                stc_clusters,  slope_time, clusters, sensors,
+                stc_clusters, slope_time, clusters, sensors,
                 selected_clusters)
             check_and_write_to_dataset(
                 X[0], 'iz_prediction', iz_prediciton, dict(
@@ -752,27 +859,45 @@ class PredictIZClusters(Localization, BaseEstimator, TransformerMixin):
             1D binary array with the length equal the number of sources.
             1 means that the source was selected as an irritative area.
         """
-        normalize_stc = False if self.normalize_using_peak else True
-        clusters_stcs = []
-        n_clusters = sum(selected_clusters)
+
+    def make_iz_prediction(self, stc_clusters, slope_time, clusters, sensors, selected_clusters):
+        clusters_stcs = []  # Инициализация списка для хранения бинаризированных значений
+
         for i, (cluster, sens) in enumerate(zip(clusters, sensors)):
-            if selected_clusters[i]:  # skip if the class is not selected
-                stc_cluster = stc_clusters[
-                    sens, cluster, :, slope_time[i]].squeeze()
-                # Binarize SourceEstimate
+            if selected_clusters[i]:
+                if slope_time[i] >= stc_clusters.shape[3]:
+                    logging.warning(
+                        f"Index {slope_time[i]} is out of bounds for axis 3 (size {stc_clusters.shape[3]}), using {stc_clusters.shape[3] - 1} instead.")
+                    slope_time[i] = stc_clusters.shape[3] - 1
+
+                stc_cluster = stc_clusters[sens, cluster, :, slope_time[i]].squeeze()
+                # Бинаризация SourceEstimate
                 stc_cluster_bin = self.binarize_stc(
                     stc_cluster, self.fwd, self.smoothing_steps_one_cluster,
-                    self.amplitude_threshold, self.min_sources,
-                    normalize_stc)
+                    self.amplitude_threshold, self.min_sources)
+
+                # Добавление бинаризированного результата в список
                 clusters_stcs.append(stc_cluster_bin)
 
-        # Binarize stc again
-        iz_prediciton = np.stack(clusters_stcs, axis=-1).sum(axis=-1)
-        iz_prediciton[iz_prediciton < n_clusters/2] = 0
-        iz_prediciton[iz_prediciton >= n_clusters/2] = 1
-        return self.binarize_stc(
-            iz_prediciton, self.fwd, self.smoothing_steps_final,
-            self.amplitude_threshold, self.min_sources)
+        # Теперь можно использовать clusters_stcs для дальнейших вычислений
+        if len(clusters_stcs) > 0:  # Проверка на наличие элементов в списке
+            iz_prediction = np.stack(clusters_stcs, axis=-1).sum(axis=-1)
+            iz_prediction[iz_prediction < len(clusters_stcs) / 2] = 0
+            iz_prediction[iz_prediction >= len(clusters_stcs) / 2] = 1
+
+            current_prediction = self.binarize_stc(
+                iz_prediction, self.fwd, self.smoothing_steps_final,
+                self.amplitude_threshold, self.min_sources)
+
+            print("LEN OF PRED: ", len(current_prediction))
+            print("LEN OF PRED == 1:", sum(current_prediction))
+            print("VOL_PRED:", current_prediction[8194::])
+
+            return current_prediction
+
+        else:
+            logging.error("No clusters selected for prediction.")
+            return None
 
 
 class ManualEventsLocalization(Localization, BaseEstimator, TransformerMixin):
@@ -809,11 +934,10 @@ class ManualEventsLocalization(Localization, BaseEstimator, TransformerMixin):
     def __init__(self, case: CaseManager,
                  inv_method: str = 'MNE',
                  epochs_window: Tuple[float] = (-0.5, 0.5),
-                 spacing='ico5',
+                 spacing='oct6',
                  sensors='grad',
                  smoothing_steps=10,
                  smoothing_steps_final=10):
-
         self.setup_fwd(case, sensors=sensors, spacing=spacing)
         self.inverse_operator = make_inverse_operator(
             self.info, self.fwd, self.cov, depth=None, fixed=False)
@@ -850,18 +974,18 @@ class ManualEventsLocalization(Localization, BaseEstimator, TransformerMixin):
         lambda2 = 1.0 / snr ** 2
         stcs = mne.minimum_norm.apply_inverse_epochs(
             epochs, self.inverse_operator, lambda2,
-            self.inv_method, pick_ori=None)
+            self.inv_method, pick_ori=None)  # None)
 
         results = []
         for stc in stcs:
             stc_spike_bin = self.binarize_stc(
-                stc.data[:, n_times//2].squeeze(),
+                stc.data[:, n_times // 2].squeeze(),
                 self.fwd, smoothing_steps=self.smoothing_steps)
             results.append(stc_spike_bin)
 
         # Binarize stc again
         iz_prediction = np.stack(results, axis=-1).sum(axis=-1)
-        iz_prediction[iz_prediction < n_epochs/2] = 0
-        iz_prediction[iz_prediction >= n_epochs/2] = 1
+        iz_prediction[iz_prediction < n_epochs / 2] = 0
+        iz_prediction[iz_prediction >= n_epochs / 2] = 1
         return self.binarize_stc(
             iz_prediction, self.fwd, smoothing_steps=self.smoothing_steps_final)

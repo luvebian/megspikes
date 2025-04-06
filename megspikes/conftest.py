@@ -49,7 +49,7 @@ def simulation_epochs_grad(simulation):
 def prepare_aspire_alphacsc_random_dataset(simulation):
     case = simulation.case_manager
     db = read_meg_info_for_database(
-        simulation.case_manager.fif_file, case.fwd['ico5'])
+        simulation.case_manager.fif_file, case.fwd['oct6'])
     sfreq = 200.
     raw = simulation.raw_simulation.copy().resample(sfreq, npad="auto")
     n_ica_comp = 4
@@ -144,7 +144,7 @@ def prepare_aspire_alphacsc_random_dataset(simulation):
 def prepare_aspire_alphacsc_empty_dataset(simulation):
     case = simulation.case_manager
     db = read_meg_info_for_database(
-        simulation.case_manager.fif_file, case.fwd['ico5'])
+        simulation.case_manager.fif_file, case.fwd['oct6'])
     sfreq = 200.
     raw = simulation.raw_simulation.copy().resample(sfreq, npad="auto")
     n_ica_comp = 4
@@ -166,7 +166,7 @@ def prepare_aspire_alphacsc_empty_dataset(simulation):
 def prepare_clusters_empty_dataset(simulation):
     case = simulation.case_manager
     db = read_meg_info_for_database(
-        simulation.case_manager.fif_file, case.fwd['ico5'])
+        simulation.case_manager.fif_file, case.fwd['oct6'])
     raw = simulation.raw_simulation
     n_clusters = 5
     ds = db.make_clusters_dataset(
@@ -181,7 +181,7 @@ def prepare_clusters_empty_dataset(simulation):
 def prepare_clusters_random_dataset(simulation):
     case = simulation.case_manager
     db = read_meg_info_for_database(
-        simulation.case_manager.fif_file, case.fwd['ico5'])
+        simulation.case_manager.fif_file, case.fwd['oct6'])
     raw = simulation.raw_simulation
     n_clusters = 2
     ds = db.make_clusters_dataset(
