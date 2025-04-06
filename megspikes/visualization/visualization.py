@@ -599,31 +599,38 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
 
         # Получение src из fwd
         src = self.data.fwd['src']
-        print("SRC:", src)
 
         # Выбор только объемных источников (volume regions)
-        volume_src = [s for s in src if s['type'] == 'vol']
-        print(volume_src)
-        if not volume_src:
+        vol_src = [s for s in src if s['type'] == 'vol']
+        print(vol_src)
+        if not vol_src:
             raise ValueError("No volume source regions found in the source space.")
 
-        print("VOLUME:", volume_src)
+        volume_src = mne.SourceSpaces(source_spaces=vol_src, info=None)
+        print("LEN VOL SRC", len(volume_src))
 
         labels_vol = mne.get_volume_labels_from_src(src, subject=self.data.case_name, subjects_dir=self.data.freesurfer_dir)
 
+        non_empty_vol_labels = []
+
+        # choose labels with at least 1 vertix
+        for label in labels_vol:
+            if len(label.vertices) > 0 and label.name != 'Amygdala-rh':
+                non_empty_vol_labels.append(label)
+        print("VOL_LABELS:", len(non_empty_vol_labels))
+
         # Преобразование MixedSourceEstimate в VolumeSourceEstimate
-        stc_vol = stc.copy().extract_label_time_course(
-            labels=labels_vol, src=src, mode='mean'
+        stc_vol_tc = stc.copy().extract_label_time_course(
+            labels=non_empty_vol_labels, src=src, mode='mean'
         )
+
+        stc_vol = stc.volume()
 
         # Сохранение в формате NIfTI
-        nii_path = os.path.join(
-            f'/Users/diana/Documents/FreeSurfer/{self.data.case_name}/bem',
-            'stc_volume.nii.gz'
-        )
-        mne.save_stc_as_volume(nii_path, stc_vol, src, mri_resolution=False)
-        print(f"NIfTI file saved at {nii_path}")
+        nii_path = f'/Users/diana/Documents/FreeSurfer/{self.data.case_name}/bem/stc_volume.nii.gz'
 
+        stc_vol.save_as_volume(fname=nii_path, src=volume_src, mri_resolution=False, overwrite=True)
+        print(f"NIfTI file saved at {nii_path}")
 
         # Работа с T1-файлом
         t1_fname = f'/Users/diana/Documents/FreeSurfer/{self.data.case_name}/mri/T1.mgz'
@@ -633,6 +640,8 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
         # Выбор времени для визуализации
         time_idx = 61  # Индекс времени
 
+        # t = {stc_vol_tc.times[time_idx]:.1f}
+
         # Загрузка сохраненного NIfTI и визуализация
         try:
             nii_img = nib.load(nii_path)
@@ -640,7 +649,7 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
                 index_img(nii_img, time_idx),
                 bg_img=t1_fname,
                 threshold=0.0,
-                title=f"Nilearn Visualization (t={stc_vol.times[time_idx]:.1f} s)",
+                title=f"Nilearn Visualization",
             )
             print("Nilearn visualization complete.")
         except Exception as e:
