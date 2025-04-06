@@ -602,7 +602,6 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
 
         # Выбор только объемных источников (volume regions)
         vol_src = [s for s in src if s['type'] == 'vol']
-        print(vol_src)
         if not vol_src:
             raise ValueError("No volume source regions found in the source space.")
 
@@ -675,8 +674,6 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
                 self.data.ds.iz_prediction.sel(
                     iz_prediction_timepoint=self.timepoint).values,
                 self.data.fwd, self.data.case_name)
-            print("stc shape:", stc.shape)
-            print(self.data.case_name)
             filepath = f'/Users/diana/Documents/cases/{self.data.case_name}/forward_model/src.pckl'
             src = pickle.load(open(filepath, "rb"))
             # src = mne.read_source_spaces(filepath)

@@ -220,7 +220,6 @@ class CaseManager():
             src += vol_src
 
             # Сохранение
-            print("!!!!", type(src))
             mne.write_source_spaces(fsrc, src, overwrite=True, verbose='error')
         else:
             src = mne.read_source_spaces(fsrc, verbose='error')
@@ -247,5 +246,4 @@ class CaseManager():
 
         if fixed:
             fwd = mne.convert_forward_solution(fwd, force_fixed=True, verbose='error')
-        print("FINAL SRC:", type(src))
         return fwd, bem, src, trans

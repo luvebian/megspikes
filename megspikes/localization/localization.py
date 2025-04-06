@@ -188,13 +188,10 @@ class Localization():
         labels_parc = mne.read_labels_from_annot(
             subject=self.case_name, subjects_dir=self.freesurfer_dir)
         src = inverse_operator['src']
-        print("type of src:", type(src))
         filepath = f'/Users/diana/Documents/cases/{self.case_name}/forward_model/src.pckl'
         pickle.dump(src, open(filepath, "wb"))
         label_ts = mne.extract_label_time_course(
             [stc], labels_parc, src, mode=mode, allow_empty=True)
-        print("label_ts: ", label_ts)
-        print("labels_shape:", label_ts[0].shape)
         return label_ts
 
     def binarize_stc(self, data: np.ndarray, fwd: mne.Forward,
@@ -876,12 +873,17 @@ class PredictIZClusters(Localization, BaseEstimator, TransformerMixin):
                     stc_cluster, self.fwd, self.smoothing_steps_one_cluster,
                     self.amplitude_threshold, self.min_sources)
 
+                print(f"CLUSTER {i}: {stc_cluster_bin[8194::]}")
+
                 # Добавление бинаризированного результата в список
                 clusters_stcs.append(stc_cluster_bin)
+
+        print("CLUSTERS_NUM", len(clusters_stcs))
 
         # Теперь можно использовать clusters_stcs для дальнейших вычислений
         if len(clusters_stcs) > 0:  # Проверка на наличие элементов в списке
             iz_prediction = np.stack(clusters_stcs, axis=-1).sum(axis=-1)
+            print(f"INIT ZONE PREDICTION: {iz_prediction.shape}")
             iz_prediction[iz_prediction < len(clusters_stcs) / 2] = 0
             iz_prediction[iz_prediction >= len(clusters_stcs) / 2] = 1
 

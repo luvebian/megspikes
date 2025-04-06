@@ -173,8 +173,6 @@ def iz_prediction_pipeline(case: CaseManager, update_params: dict,
 def read_detection_iz_prediction_pipeline(
         case: CaseManager, clusters_params: dict,
         rewrite_previous_results: bool = False):
-    print("type of SRC", type(case.src['oct6']))
-    print("SRC", case.src['oct6'])
     if (not rewrite_previous_results) & case.cluster_dataset.is_file():
         raise RuntimeError(
             'Results dataset exists and you try to overwrite it. If you want to'
