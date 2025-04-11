@@ -523,31 +523,18 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
 
     @param.depends('plot_mixed_stc', watch=True)
     def _plot_mixed_stc(self):
-        # Преобразование данных в STC
         stc = self.data.array_to_stc(
             self.data.stc.sel(
                 cluster=self.cluster, sensors=self.sensors).values,
-            self.data.fwd,
-            self.data.case_name
-        )
+            self.data.fwd, self.data.case_name)
 
-        # Загрузка source space
         filepath = f'/Users/diana/Documents/cases/{self.data.case_name}/forward_model/src.pckl'
         src = pickle.load(open(filepath, "rb"))
 
-        surfer_kwargs = dict(
-            hemi='both', surface='white', spacing='ico4',
-            colorbar=False, background='w', foreground='k',
-            colormap='Reds', smoothing_steps=10, alpha=0.2,
-            add_data_kwargs={"fmin": 0, "fmid": 0.5, "fmax": 0.8})
+        self.brain = stc.plot(src=src,
+            subjects_dir=self.data.freesurfer_dir, hemi='both', surface='white',
+                              smoothing_steps=10, alpha=0.2)
 
-        self.brain = stc.plot(
-            src=src,
-            views="coronal",
-            subjects_dir=self.data.freesurfer_dir,
-            brain_kwargs=dict(silhouette=True),
-            **surfer_kwargs
-        )
 
     @param.depends('plot_stc', watch=True)
     def _plot_stc_brain(self):
