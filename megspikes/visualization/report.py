@@ -188,6 +188,7 @@ def plot_alphacsc_atoms(ds: xr.Dataset, raw: mne.io.Raw, sensors: str = 'grad'):
         # Plot the temporal pattern of the atom
         ax = next(it_axes)
         t = ds.atom_v_time.values
+        print("CHECK TYPES", type(v_k), type(t))
         ax.plot(t, v_k)
         ax.set(xlabel='Time (sec)',
                title="Temporal pattern %d" % kk)
@@ -216,8 +217,10 @@ def plot_alphacsc_clusters(ds: xr.Dataset, raw: mne.io.Raw,
     goodness = goodness[atom]
     u_hat = u_hat[atom]
     max_channel = np.argmax(u_hat)
+    print("MAX_CHANNEL", max_channel)
     v_hat = v_hat[atom]
     v_hat = v_hat / (np.max(np.abs(v_hat)))
+    #np.savetxt(fr"Z:\Diane_Vrubel\Data\meg_{sensors}_{atom}.out", v_hat)
     v_hat_times = np.linspace(-0.25, 0.25, len(v_hat))
 
     detection_mask = (detections > 0) & (atoms == atom)
@@ -264,6 +267,11 @@ def plot_alphacsc_clusters(ds: xr.Dataset, raw: mne.io.Raw,
     ax2 = plt.subplot(2, 2, 2)
     epochs.plot_image(picks=[max_channel], colorbar=False, axes=[ax2],
                       evoked=False, show=False)
+    # for extraction
+    epochs_selected = epochs.pick([max_channel])
+    all_data = epochs_selected.get_data()  
+    epochs_data = np.mean(all_data, axis=1)  
+    np.save(fr"Z:\Diane_Vrubel\Data\MEG_predictions\meg_{sensors}_{atom}_noav.npy", all_data)
 
     times = [
         epochs.times[t] for t in range(

@@ -523,12 +523,14 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
 
     @param.depends('plot_mixed_stc', watch=True)
     def _plot_mixed_stc(self):
+        mne.viz.set_3d_options(antialias=False)
+
         stc = self.data.array_to_stc(
             self.data.stc.sel(
                 cluster=self.cluster, sensors=self.sensors).values,
             self.data.fwd, self.data.case_name)
 
-        filepath = f'/Users/diana/Documents/cases/{self.data.case_name}/forward_model/src.pckl'
+        filepath = fr'Z:\Diane_Vrubel\Data\MEG\{self.data.case_name}\forward_model\src.pckl'
         src = pickle.load(open(filepath, "rb"))
 
         self.brain = stc.plot(src=src,
@@ -547,56 +549,11 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
         )
 
         # Загрузка source space
-        filepath = f'/Users/diana/Documents/cases/{self.data.case_name}/forward_model/src.pckl'
+        filepath = fr'Z:\Diane_Vrubel\Data\MEG\{self.data.case_name}\forward_model\src.pckl'
         src = pickle.load(open(filepath, "rb"))
 
-        stc.volume().plot(src=src, subjects_dir='/Users/diana/Documents/FreeSurfer')
-
-        '''
-        # Проверяем соответствие количества вершин
-        src_vertices = [s['vertno'] for s in src]
-        stc_vertices = stc.vertices
-
-        # Сопоставление вершин STC с SRC
-        new_vertices = []
-        for stc_verts, src_verts in zip(stc_vertices, src_vertices):
-            # Оставляем только совпадающие вершины
-            common_verts = np.intersect1d(stc_verts, src_verts)
-            new_vertices.append(common_verts)
-
-        # Проверяем, все ли вершины STC найдены в SRC
-        if any(len(new) == 0 for new in new_vertices):
-            raise ValueError(
-                f"Mismatch between STC {len(new_vertices)} and source space vertices: some STC vertices are missing in SRC."
-            )
-
-        # Создаём новый STC с подогнанными вершинами
-        stc = mne.SourceEstimate(
-            data=stc.data[:sum(len(v) for v in new_vertices)],
-            vertices=new_vertices,
-            tmin=stc.tmin,
-            tstep=stc.tstep,
-            subject=stc.subject
-        )
-
-        print("Adjusted STC:", stc)
-
-        # Проверяем, является ли это surface source space
-        src_types = [s['type'] for s in src]
-        if not all(t == 'surf' for t in src_types):
-            raise ValueError("Source space is not purely surface. Adjust for mixed source space visualization.")
-
-        # Визуализация
-        self.brain = stc.plot(
-            hemi='both',
-            src=src,
-            views='coronal',
-            initial_time=0.2,
-            subjects_dir=self.data.freesurfer_dir,
-            brain_kwargs=dict(silhouette=True),
-            smoothing_steps=7
-        )
-        '''
+        stc.volume().plot(src=src, subjects_dir= fr'Z:\Diane_Vrubel\Data\FreeSurfer')
+    
 
     @param.depends('plot_vol', watch=True)
     def _plot_vol_brain(self):
@@ -633,7 +590,7 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
 
         # choose labels with at least 1 vertix
         for label in labels_vol:
-            if len(label.vertices) > 0 and label.name != 'Amygdala-rh':
+            if len(label.vertices) > 0:
                 non_empty_vol_labels.append(label)
         print("VOL_LABELS:", len(non_empty_vol_labels))
 
@@ -645,13 +602,13 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
         stc_vol = stc.volume()
 
         # Сохранение в формате NIfTI
-        nii_path = f'/Users/diana/Documents/FreeSurfer/{self.data.case_name}/bem/stc_volume.nii.gz'
+        nii_path = fr'Z:\Diane_Vrubel\Data\FreeSurfer\{self.data.case_name}\bem\stc_volume.nii.gz'
 
         stc_vol.save_as_volume(fname=nii_path, src=volume_src, mri_resolution=False, overwrite=True)
         print(f"NIfTI file saved at {nii_path}")
 
         # Работа с T1-файлом
-        t1_fname = f'/Users/diana/Documents/FreeSurfer/{self.data.case_name}/mri/T1.mgz'
+        t1_fname = fr'Z:\Diane_Vrubel\Data\FreeSurfer\{self.data.case_name}\mri\T1.mgz'
         if not os.path.exists(t1_fname):
             raise FileNotFoundError(f"T1-weighted MRI file not found: {t1_fname}")
 
@@ -688,12 +645,16 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
 
     @param.depends('plot_iz', watch=True)
     def _plot_iz_prediciton(self):
+        mne.viz.set_3d_options(antialias=False)
+        
         if not self.prediction_is_running:
             stc = self.data.array_to_stc(
                 self.data.ds.iz_prediction.sel(
                     iz_prediction_timepoint=self.timepoint).values,
                 self.data.fwd, self.data.case_name)
-            filepath = f'/Users/diana/Documents/cases/{self.data.case_name}/forward_model/src.pckl'
+            #print(stc[8036::])
+            #print("THIS", len(stc[8036::]))
+            filepath =  fr'Z:\Diane_Vrubel\Data\MEG\{self.data.case_name}\forward_model\src.pckl'
             src = pickle.load(open(filepath, "rb"))
             # src = mne.read_source_spaces(filepath)
             surfer_kwargs = dict(
@@ -708,7 +669,7 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
                 brain_kwargs=dict(silhouette=True),
                 **surfer_kwargs
             )
-            filepath_stc = f'/Users/diana/Documents/cases/{self.data.case_name}/forward_model/stc.pckl'
+            filepath_stc =  fr'Z:\Diane_Vrubel\Data\MEG\{self.data.case_name}\forward_model\stc.pckl'
             pickle.dump(stc, open(filepath_stc, "wb"))
         else:
             logging.warning("IZ prediction is running")
@@ -720,7 +681,7 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
                 self.data.ds.iz_prediction.sel(
                     iz_prediction_timepoint=self.timepoint).values,
                 self.data.fwd, self.data.case_name)
-            filepath = f'/Users/diana/Documents/cases/{self.data.case_name}/forward_model/src.pckl'
+            filepath = fr'Z:\Diane_Vrubel\Data\MEG\{self.data.case_name}\forward_model\src.pckl'
             src = pickle.load(open(filepath, "rb"))
             self.brain = stc.volume().plot(
                 src=src, subjects_dir=self.data.freesurfer_dir, mode="glass_brain")
@@ -753,6 +714,7 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
     def _rerun_iz_prediction(self):
         self._update_dataset()
         self.prediction_is_running = True
+        print("prediction started")
         predict = PredictIZClusters(
             case=self.data.case,
             sensors=True,
@@ -761,6 +723,7 @@ class ClusterSlopeViewer(param.Parameterized, CaseManager):
             amplitude_threshold=self.amplitude_threshold,
             min_sources=self.min_sources)
         self.data.ds, _ = predict.fit_transform((self.data.ds, None))
+        print("prediction done")
         self.prediction_is_running = False
 
     def view(self):

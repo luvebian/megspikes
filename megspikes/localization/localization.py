@@ -107,7 +107,7 @@ class Localization():
 
     def setup_mixed_src(self):
         """Create and configure mixed source space."""
-        bem_dir = f'/Users/diana/Documents/FreeSurfer/{self.case_name}/bem'
+        bem_dir = fr'Z:\Diane_Vrubel\Data\FreeSurfer\{self.case_name}\bem'
 
         # Create source spaces
         src = mne.setup_source_space(
@@ -188,7 +188,7 @@ class Localization():
         labels_parc = mne.read_labels_from_annot(
             subject=self.case_name, subjects_dir=self.freesurfer_dir)
         src = inverse_operator['src']
-        filepath = f'/Users/diana/Documents/cases/{self.case_name}/forward_model/src.pckl'
+        filepath = fr'Z:\Diane_Vrubel\Data\MEG\{self.case_name}\forward_model\src.pckl'
         pickle.dump(src, open(filepath, "wb"))
         label_ts = mne.extract_label_time_course(
             [stc], labels_parc, src, mode=mode, allow_empty=True)
@@ -196,9 +196,11 @@ class Localization():
 
     def binarize_stc(self, data: np.ndarray, fwd: mne.Forward,
                      smoothing_steps: int = 3,
-                     amplitude_threshold: float = 0.5,
-                     min_sources: int = 10,
-                     normalize: bool = True) -> np.ndarray:
+                     amplitude_threshold = 0.8,
+                     amplitude_threshold_vol = 0.2,
+                     min_sources = 10,
+                     normalize  = True,
+                     surf_sources = 8194) -> np.ndarray:
         """Binarization and smoothing of one VolSourceEstimate timepoint.
            converting to mne.SourceEstimate.
 
@@ -247,20 +249,26 @@ class Localization():
             data /= data.max()
 
         # Check if amplitude is too small
-        if np.sum(data > amplitude_threshold) < min_sources:
+        #if np.sum(data > amplitude_threshold) < min_sources:
+        #    sort_data_ind = np.argsort(data)[::-1]
+        #    data[sort_data_ind[:min_sources]] = 1
+
+        # Threshold the data
+        data[:surf_sources] = np.where(data[:surf_sources] < amplitude_threshold, 0, 1)
+        data[surf_sources:] = np.where(data[surf_sources:] < amplitude_threshold_vol, 0, 1)
+
+        # Check if amplitude is too small
+        if np.sum(data) < min_sources:
             sort_data_ind = np.argsort(data)[::-1]
             data[sort_data_ind[:min_sources]] = 1
 
-        # Threshold the data
-        data[data < amplitude_threshold] = 0
-        data[data >= amplitude_threshold] = 1
-
+        return data #no smoothing
+    
         # Create SourceEstimate object
         stc = mne.MixedSourceEstimate(data, vertices, tmin=0,
                                       tstep=0.001, subject=self.case_name)
         # NOTE: final_data is 1D here
         final_data = np.zeros_like(data)
-
         # Smooth final surface left hemi
         lh_data = self._smooth_binarized_stc(
             stc, hemi_idx=0, smoothing_steps=smoothing_steps)
@@ -274,9 +282,9 @@ class Localization():
         data = stc.data[len(stc.vertices[0]) + len(stc.vertices[1]):, :]
         final_data[len(stc.vertices[0]) + len(stc.vertices[1]):] = data.flatten()
         final_data[final_data > 0] = 1
-
+        print("THRESH", amplitude_threshold, amplitude_threshold_vol, surf_sources)
         # Return binary map
-        return final_data
+        #return final_data
 
     def _smooth_binarized_stc(self, stc: mne.MixedSourceEstimate, hemi_idx: int,
                               smoothing_steps: int = 10):
@@ -657,7 +665,7 @@ class ClustersLocalization(Localization, BaseEstimator, TransformerMixin):
             evoked, inverse_operator, lambda2, inv_method, pick_ori=None)
         label_ts = self.make_labels_ts(stc, inverse_operator)
         src = inverse_operator["src"]
-        stc.volume().plot(src=src, subjects_dir='/Users/diana/Documents/FreeSurfer')
+        #stc.volume().plot(src=src, subjects_dir='Z:\Diane_Vrubel\DataFreeSurfer')
         return stc, label_ts
 
     def average_cluster(self, meg_data: mne.io.Raw, detection_mask: np.ndarray,
@@ -765,15 +773,16 @@ class PredictIZClusters(Localization, BaseEstimator, TransformerMixin):
                  sensors: Union[str, bool] = True,
                  smoothing_steps_one_cluster: int = 3,
                  smoothing_steps_final: int = 10,
-                 amplitude_threshold: float = 0.5,
+                 amplitude_threshold: float = 0.8,
                  min_sources: int = 10,
-                 normalize_using_peak: bool = True,
+                 normalize_using_peak: bool = False,
                  spacing='oct6'):
         self.setup_fwd(case, sensors, spacing=spacing)
         self.spacing = spacing
         self.smoothing_steps_one_cluster = smoothing_steps_one_cluster
         self.smoothing_steps_final = smoothing_steps_final
-        self.amplitude_threshold = amplitude_threshold
+        self.amplitude_threshold = 0.8
+        self.amplitude_threshold_vol = 0.2
         self.min_sources = min_sources
         self.normalize_using_peak = normalize_using_peak
 
@@ -816,8 +825,8 @@ class PredictIZClusters(Localization, BaseEstimator, TransformerMixin):
                     valid_peak_index = min(peak[ii], stc_clusters.shape[3] - 1)
                     stc_clusters[i, ii, :, :] /= stc_clusters[i, ii, :, valid_peak_index].max()
 
-        for slope_time, slope_name in zip([baseline, slope, peak],
-                                          ['baseline', 'slope', 'peak']):
+        for slope_time, slope_name in zip([baseline, peak, slope],
+                                          ['baseline', 'peak', 'slope']):
             iz_prediciton = self.make_iz_prediction(
                 stc_clusters, slope_time, clusters, sensors,
                 selected_clusters)
@@ -858,9 +867,23 @@ class PredictIZClusters(Localization, BaseEstimator, TransformerMixin):
         """
 
     def make_iz_prediction(self, stc_clusters, slope_time, clusters, sensors, selected_clusters):
+        src_file = fr'Z:\Diane_Vrubel\Data\MEG\{self.case_name}\forward_model\src.pckl' 
+        with open(src_file, 'rb') as f:
+            src_data = pickle.load(f)
+        VOL = sum([sum(x["inuse"]) if x['type'] == 'surf' else 0 for x in src_data])
         clusters_stcs = []  # Инициализация списка для хранения бинаризированных значений
 
         for i, (cluster, sens) in enumerate(zip(clusters, sensors)):
+            # saving binarised cluster
+            stc_cluster = stc_clusters[sens, cluster, :, slope_time[i]].squeeze()
+            cluster_file = fr'Z:\Diane_Vrubel\Data\MEG_predictions\{self.case_name}_nobin_cluster_{i}.out'
+            np.savetxt(cluster_file, stc_cluster)
+            bin_cluster = self.binarize_stc(
+                stc_cluster, self.fwd, self.smoothing_steps_final,
+                amplitude_threshold = self.amplitude_threshold, amplitude_threshold_vol = self.amplitude_threshold_vol, 
+                min_sources = self.min_sources, surf_sources = VOL)
+        
+            
             if selected_clusters[i]:
                 if slope_time[i] >= stc_clusters.shape[3]:
                     logging.warning(
@@ -868,32 +891,68 @@ class PredictIZClusters(Localization, BaseEstimator, TransformerMixin):
                     slope_time[i] = stc_clusters.shape[3] - 1
 
                 stc_cluster = stc_clusters[sens, cluster, :, slope_time[i]].squeeze()
+                print("CLUST_MAX", max(stc_cluster))
                 # Бинаризация SourceEstimate
+                '''
                 stc_cluster_bin = self.binarize_stc(
                     stc_cluster, self.fwd, self.smoothing_steps_one_cluster,
-                    self.amplitude_threshold, self.min_sources)
-
-                print(f"CLUSTER {i}: {stc_cluster_bin[8194::]}")
+                    amplitude_threshold = self.amplitude_threshold, amplitude_threshold_vol = self.amplitude_threshold_vol, 
+                    min_sources = self.min_sources, surf_sources = VOL)
+                '''
 
                 # Добавление бинаризированного результата в список
-                clusters_stcs.append(stc_cluster_bin)
+                clusters_stcs.append(stc_cluster)
+                #print("CLUSTER_PRED", stc_cluster.tolist())
 
         print("CLUSTERS_NUM", len(clusters_stcs))
 
         # Теперь можно использовать clusters_stcs для дальнейших вычислений
         if len(clusters_stcs) > 0:  # Проверка на наличие элементов в списке
+            '''
             iz_prediction = np.stack(clusters_stcs, axis=-1).sum(axis=-1)
-            print(f"INIT ZONE PREDICTION: {iz_prediction.shape}")
+            vol_prediction = np.stack(clusters_stcs, axis=-1).sum(axis=-1)
+            
             iz_prediction[iz_prediction < len(clusters_stcs) / 2] = 0
             iz_prediction[iz_prediction >= len(clusters_stcs) / 2] = 1
 
+            vol_prediction[vol_prediction >= 1] = 1
+            vol_prediction[vol_prediction == 0] = 0
+
+            iz_prediction[VOL::] = vol_prediction[VOL::]
+        
+            np.savetxt("Z:\Diane_Vrubel\Data\MEG_predictions\A0R0_test_cl.out", clusters_stcs)
+            print("Clusters np saved!")
+            '''
+
+            stc_averaged = np.mean(clusters_stcs, axis=0)
+            stc_averaged /= max(stc_averaged)
+            stc_averaged_cort = stc_averaged[:(VOL-1)]
+            stc_averaged_deep = stc_averaged[VOL:]
+
+            '''
+            test_file = fr'Z:\Diane_Vrubel\Data\MEG_predictions\{self.case_name}_pred_nobin_83_cort_av.out'
+            np.savetxt(test_file, stc_averaged_cort)
+            print("Cortical data saved!")
+
+            test_file = fr'Z:\Diane_Vrubel\Data\MEG_predictions\{self.case_name}_pred_nobin_83_deep_av.out'
+            np.savetxt(test_file, stc_averaged_deep)
+            print("Deep data saved!")
+            '''
+            prebin_file = fr'Z:\Diane_Vrubel\Data\MEG_predictions\{self.case_name}_SEL_nobin_82_non_av_prebin.out'
+            np.savetxt(prebin_file, stc_averaged)
+
             current_prediction = self.binarize_stc(
-                iz_prediction, self.fwd, self.smoothing_steps_final,
-                self.amplitude_threshold, self.min_sources)
+                stc_averaged, self.fwd, self.smoothing_steps_final,
+                amplitude_threshold = self.amplitude_threshold, amplitude_threshold_vol = self.amplitude_threshold_vol, 
+                min_sources = self.min_sources, surf_sources = VOL)
 
             print("LEN OF PRED: ", len(current_prediction))
             print("LEN OF PRED == 1:", sum(current_prediction))
-            print("VOL_PRED:", current_prediction[8194::])
+            print("VOL_PRED:", current_prediction[VOL::])
+
+            bin_file = fr'Z:\Diane_Vrubel\Data\MEG_predictions\{self.case_name}_SEL_nobin_82_non_av.out'
+            np.savetxt(bin_file, current_prediction)
+            print("IZ prediction successfully updated")
 
             return current_prediction
 
